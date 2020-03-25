@@ -14,7 +14,7 @@ from datetime import datetime
 # Scrape data from Rob's site
 # This is a non-standard data source
 ##
-r = requests.get('https://jupyter.lccllc.info:4443/power/pwr.php?MATE=3')
+r = requests.get('https://recon.lccllc.info/power/pwr.php?MATE=3')
 
 if r.status_code != 200:
   # Failed to get a good return code from the site
@@ -71,7 +71,7 @@ if 'kw' in solar.keys():
   # The storeKey is a GLOBAL key to upload/post data to the server.  The key is
   # unfortinately weak.  The key is used for all sensors.
   ##
-  r = requests.post('https://psi.alaska.edu/pvmonitor/readingdb/reading/LincolnCreek/store/',
+  r = requests.post('http://localhost/pvmonitor/readingdb/reading/LincolnCreek/store/',
   data = {
     'storeKey':'PutStorageKeyHere',
     'val':str(pv),

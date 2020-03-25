@@ -1,4 +1,5 @@
 # pvmonitor-inverter-collection-tools
 Tools to collect data for the pvmonitor inverter database.
 
-website used for https://psi.alaska.edu/pvmonitor/reports/
+Website used for former https://psi.alaska.edu/pvmonitor/reports/
+and now http://bmontest.thearcticprogram.net/pvmonitor/reports/
