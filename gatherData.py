@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import os, sys
+import os, datetime
 import sqlite_api
 import pydoc
 
@@ -8,6 +8,7 @@ from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.common.exceptions import NoSuchElementException
 
 # CLASSES
 ## 
@@ -65,15 +66,24 @@ class Installations:
 
 class DebugOutput:
     def __init__(self,logDIR,logFILE):
+        self.logFN = None
+        self.logDir = None
+        self.logOpen = False
         if os.path.isdir(logDIR):
             self.logFN = open(logDIR + "/" + logFILE,"w")
+            self.logDir = logDIR
+            self.logOpen = True
 
     def msg(self,msg):
-        self.logFN.write("%s\n" % (msg))
+        if self.logOpen:
+            ts = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+            self.logFN.write("%s %s\n" % (ts,msg))
         return
 
     def close(self):
-        self.logFN.close()
+        if self.logOpen:
+            self.logFN.close()
+            self.logOpen = False
         return
 
 class WebScraper:
@@ -81,6 +91,7 @@ class WebScraper:
         self.credentials = {}
         self.debug = False
         self.driver = None
+        self.driverLogFile = "geckodriver.log"
         self.driverOpen = False
         self.errorFlag = False
         self.errorMsg = None
@@ -88,6 +99,24 @@ class WebScraper:
         self.meter = {}
         self.webMod = None
         return
+
+    def dumpLog(self, logFile):
+        baseDir = self.log.logDir
+        baseDir = '/var/www/html/acepCollect/log'
+        if 'siteCode' in self.meter:
+            meterDir = os.path.join(baseDir,self.meter['siteCode'])
+            if not(os.path.isdir(meterDir)):
+                os.mkdir(meterDir)
+            fullDumpFile = os.path.join(meterDir,logFile)
+            fn = open(fullDumpFile,'w')
+            fn.write("HTML:\n")
+            fn.write(self.driver.page_source)
+            fn.write("\n")
+            #fn.write("Console:\n")
+            #for entry in self.driver.get_log("browser"):
+            #    fn.write(entry)
+            #fn.write("\n")
+            fn.close()
 
     def saveScreen(self, saveFile):
         if self.driverOpen:
@@ -97,9 +126,14 @@ class WebScraper:
                 if not(os.path.isdir(meterDir)):
                     os.mkdir(meterDir)
                 fullSaveFile = os.path.join(meterDir,saveFile)
-                print(self.meter)
                 self.driver.save_screenshot(fullSaveFile)
 
+        return
+
+    def logError(self,errorMessage):
+        self.errorFlag = True
+        self.errorMsg = errorMessage
+        self.log.msg(self.errorMsg)
         return
 
     def setMeter(self,meter,cred):
@@ -126,6 +160,11 @@ class WebScraper:
         #pro.set_preference("security.tls.version.enable-depricated",True)
         #print(dir(pro))
         #print(pro.default_preferences)
+        # Check for geckodriver.log file and erase
+        # before starting a new driver
+        ##
+        if os.path.isfile(self.driverLogFile):
+            os.unlink(self.driverLogFile)
         self.driver = webdriver.Firefox(firefox_profile=pro,options=options,capabilities=cap)
         self.driverOpen = True
         return
@@ -147,32 +186,59 @@ class WebScraper:
             dynObj = pydoc.locate(meterClass)
             if not(meterClass) in dir(dynObj):
                 self.webMod = None
-                self.errorFlag = True
-                self.errorMsg = "Unable to load meter class"
+                self.logError("Unable to load meter class")
                 return
             dynAttr = getattr(dynObj,meterClass)
             dynClass = dynAttr()
             self.webMod = dynClass
+            self.startDriver()
+            self.webMod.setDriver(self.driver)
 
         # Using the meter class, proceed to login to the
         # website.
         ##
-        self.startDriver()
         try:
-            self.driver.get(self.webMod.url)
-        except:
-            self.errorFlag = True
-            self.errorMsg = "URL connection error"
+            self.webMod.gotoLogin()
+        except Exception as err:
+            msg = "Unhandled exception: %s" % str(err)
+            self.logError(msg)
+            self.saveScreen("error.png")
+            self.dumpLog("error.log")
         if self.debug:
-            self.saveScreen("debug.png")
-        self.stopDriver()
+            self.saveScreen("login.png")
+
+        if not(self.errorFlag):
+            try:
+                self.webMod.doLogin(self.credentials)
+            except NoSuchElementException as err: 
+                msg = "No such element found: %s" % str(err)
+                self.logError(msg)
+            except Exception as err:
+                msg = "Unhandled exception: %s" % str(err)
+                self.logError(msg)
+
+        if not(self.errorFlag):
+            self.dumpLog("trace.log")
+            if self.debug:
+                self.saveScreen("postLogin.png")
+
         return
 
     def logout(self):
-        pass
+        try:
+            self.webMod.doLogout()
+        except NoSuchElementException as err: 
+            msg = "No such element found: %s" % str(err)
+            self.logError(msg)
+        except Exception as err:
+            msg = "Unhandled exception: %s" % str(err)
+            self.logError(msg)
+        return
 
     def close(self):
-        pass
+        self.stopDriver()
+        self.log.close()
+        return
 
 # MAIN PROGRAM
 ##
@@ -190,11 +256,14 @@ meters.openDB(dbConfig)
 activeMeters = meters.getActiveMeters()
 
 # Work through all the active meters by credential
+# so that we do not unnecessarily hammer a website
+# with login requests.
 ##
 for m in activeMeters['credentials']:
     # Start a web scraper
     ##
     ws = WebScraper(log=logger)
+    ws.log.msg("** Site %s" % (m))
     ct = 0
     for i in activeMeters['sites']:
         cc = i['credCode']
@@ -203,12 +272,16 @@ for m in activeMeters['credentials']:
         ct = ct + 1
         if ct == 1:
             ws.setMeter(i,meters.meters[cc])
+            ws.log.msg("* Login %s (start)" % (i['siteName']))
             ws.login()
-    #ws.logout()
+            ws.log.msg("* Login %s (end)" % (i['siteName']))
+        ws.goDataPage()
+    self.log.msg("* Logout (start)")
+    ws.logout()
+    self.log.msg("* Logout (end)")
 
     # Stop the web scraper
     ##
     ws.close()
     break
 
-logger.close()
