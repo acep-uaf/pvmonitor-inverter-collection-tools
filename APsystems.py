@@ -17,8 +17,8 @@ class APsystems:
 
     def doLogin(self,credentials):
         #print(credentials)
-        loginUsername = credentials['meterUsername']
-        loginPassword = credentials['meterPassword']
+        loginUsername = credentials["meterUsername"]
+        loginPassword = credentials["meterPassword"]
 
         formUsername = self.driver.find_element_by_name("username")
         formPassword = self.driver.find_element_by_name("password")
@@ -27,22 +27,28 @@ class APsystems:
         formPassword.send_keys(loginPassword)
         
         self.driver.find_element_by_id("Login").click()
-        self.waitFor('id','datetime_val',10)
+        self.waitFor("idClick","datetime_val",10)
+
+        print(self.urlLogin)
+        print(loginUsername,loginPassword)
         return
 
     def doLogout(self):
         linkSignout = self.driver.find_element_by_link_text("Sign out")
         linkSignout.click()
-        self.waitFor('id','Login',10)
+        self.waitFor("idClick","Login",10)
         return
 
-    def goDataPage(self):
-        self.driver.find_element
+    def gotoDataPage(self):
+        self.driver.find_element_by_id("module_head").click()
         # wait for id='powerSlider' to exist
+        # wait for id='navigator0' to exist
+        ##
+        self.waitFor("idClick","ArrayViewforHightChart",10)
 
-    def gotoLogin(self):
+    def gotoLoginPage(self):
         self.driver.get(self.urlLogin)
-        self.waitFor('id','Login',10)
+        self.waitFor("idClick","Login",10)
         return
 
     def setDriver(self,driver):
@@ -65,7 +71,7 @@ class APsystems:
 
         wait = WebDriverWait(self.driver,elementTimeout)
         try:
-            if elementType == 'id':
+            if elementType == "idClick":
                 element = wait.until(EC.element_to_be_clickable((By.ID,elementValue)))
         except:
             pass

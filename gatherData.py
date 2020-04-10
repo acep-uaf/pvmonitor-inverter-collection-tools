@@ -118,6 +118,26 @@ class WebScraper:
             #fn.write("\n")
             fn.close()
 
+    def collectData(self):
+        try:
+            self.webMod.gotoDataPage()
+        except Exception as err:
+            msg = "Unhandled exception: %s" % str(err)
+            self.logError(msg)
+            self.saveScreen("error.png")
+            self.dumpLog("error.log")
+        if self.debug:
+            self.saveScreen("dataPage.png")
+            self.dumpLog("data.log")
+
+        return
+
+    def logError(self,errorMessage):
+        self.errorFlag = True
+        self.errorMsg = errorMessage.strip()
+        self.log.msg(self.errorMsg)
+        return
+
     def saveScreen(self, saveFile):
         if self.driverOpen:
             baseSaveDir = '/var/www/html/acepCollect'
@@ -128,12 +148,6 @@ class WebScraper:
                 fullSaveFile = os.path.join(meterDir,saveFile)
                 self.driver.save_screenshot(fullSaveFile)
 
-        return
-
-    def logError(self,errorMessage):
-        self.errorFlag = True
-        self.errorMsg = errorMessage
-        self.log.msg(self.errorMsg)
         return
 
     def setMeter(self,meter,cred):
@@ -192,13 +206,14 @@ class WebScraper:
             dynClass = dynAttr()
             self.webMod = dynClass
             self.startDriver()
+            self.log.msg("* Driver started")
             self.webMod.setDriver(self.driver)
 
         # Using the meter class, proceed to login to the
         # website.
         ##
         try:
-            self.webMod.gotoLogin()
+            self.webMod.gotoLoginPage()
         except Exception as err:
             msg = "Unhandled exception: %s" % str(err)
             self.logError(msg)
@@ -275,10 +290,14 @@ for m in activeMeters['credentials']:
             ws.log.msg("* Login %s (start)" % (i['siteName']))
             ws.login()
             ws.log.msg("* Login %s (end)" % (i['siteName']))
-        ws.goDataPage()
-    self.log.msg("* Logout (start)")
+        ws.log.msg("* Collect (start)")
+        ws.collectData()
+        ws.log.msg("* Collect (end)")
+        #ws.postData()
+
+    ws.log.msg("* Logout (start)")
     ws.logout()
-    self.log.msg("* Logout (end)")
+    ws.log.msg("* Logout (end)")
 
     # Stop the web scraper
     ##
