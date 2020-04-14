@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-import os, datetime
+import os, datetime, glob
 import sqlite_api
 import pydoc
 
@@ -18,35 +18,15 @@ class Installations:
         self.installationData = None
         self.meters = None
 
-    def openDB(self, dbname):
-        if os.path.isfile(dbname):
-            self.db = sqlite_api.sql(dbConfig)
+    def hasUnits(self, installationName):
+        result = False
 
-            self.db.query("SELECT * FROM installations")
-            self.installationData = self.db.data
+        s = "SELECT * FROM installUnits WHERE siteName=%" % (installationName)
+        self.db.query(s)
+        if len(self.db.data) > 0:
+            result = True
 
-            # Update any installation records with meterID
-            # based on credential code.  Detect mismatches.
-            ##
-            for i in self.installationData:
-                if i['meterID'] == None:
-                    mID = meters[i['credCode']]['meterID']
-                    s = "UPDATE installations SET meterID=%s WHERE installID=%s" % (mID,i['installID'])
-                    #print(s)
-                    self.db.run(s)
-
-            self.db.query("SELECT * FROM installations")
-            self.installationData = self.db.data
-
-            self.db.query("SELECT * FROM meters")
-            meterData = self.db.data
-            # Realign meters by credential code (credCode)
-            ##
-            self.meters = {}
-            for m in meterData:
-                c = m['credCode']
-                self.meters[c] = m
-        return
+        return result
 
     def getActiveMeters(self):
         # Get active installations
@@ -63,6 +43,48 @@ class Installations:
                     act['credentials'].append(cc)
                 act['credentials'].sort()
         return act
+
+    def getUnits(self, installationName):
+
+        s = "SELECT * FROM installUnits WHERE siteName=%" % (installationName)
+        self.db.query(s)
+
+        unitNames = {}
+        for r in self.db.data:
+            unitNames[r['unitName']] = r['siteName']
+
+        return unitNames
+
+    def openDB(self, dbname):
+        if os.path.isfile(dbname):
+            self.db = sqlite_api.sql(dbConfig)
+
+            self.db.query("SELECT * FROM installations")
+            self.installationData = self.db.data
+
+            self.db.query("SELECT * FROM meters")
+            meterData = self.db.data
+            # Realign meters by credential code (credCode)
+            ##
+            self.meters = {}
+            for m in meterData:
+                c = m['credCode']
+                self.meters[c] = m
+
+            # Update any installation records with meterID
+            # based on credential code.  Detect mismatches.
+            ##
+            for i in self.installationData:
+                if i['meterID'] == None:
+                    mID = self.meters[i['credCode']]['meterID']
+                    s = "UPDATE installations SET meterID=%s WHERE installID=%s" % (mID,i['installID'])
+                    #print(s)
+                    self.db.run(s)
+
+            self.db.query("SELECT * FROM installations")
+            self.installationData = self.db.data
+
+        return
 
 class DebugOutput:
     def __init__(self,logDIR,logFILE):
@@ -98,11 +120,22 @@ class WebScraper:
         self.log = log
         self.meter = {}
         self.webMod = None
+        self.db = None
         return
+
+    def clearLogs(self):
+        '''Clears *.log files from specified directory'''
+        baseDir = self.log.logDir
+        if 'siteCode' in self.meter:
+            meterDir = os.path.join(baseDir,self.meter['siteCode'])
+            if os.path.isdir(meterDir):
+                fileList = glob.glob(os.path.join(meterDir,"*.log"))
+                if len(fileList) > 0:
+                    for fileName in fileList:
+                        os.unlink(fileName)
 
     def dumpLog(self, logFile):
         baseDir = self.log.logDir
-        baseDir = '/var/www/html/acepCollect/log'
         if 'siteCode' in self.meter:
             meterDir = os.path.join(baseDir,self.meter['siteCode'])
             if not(os.path.isdir(meterDir)):
@@ -126,9 +159,12 @@ class WebScraper:
             self.logError(msg)
             self.saveScreen("error.png")
             self.dumpLog("error.log")
+
         if self.debug:
             self.saveScreen("dataPage.png")
             self.dumpLog("data.log")
+
+        dataRecords = self.webMod.getDataRecords()
 
         return
 
@@ -147,12 +183,12 @@ class WebScraper:
                     os.mkdir(meterDir)
                 fullSaveFile = os.path.join(meterDir,saveFile)
                 self.driver.save_screenshot(fullSaveFile)
-
         return
 
-    def setMeter(self,meter,cred):
+    def setMeter(self,meter,cred,db):
         self.meter = meter
         self.credentials = cred
+        self.db = db
         if meter['siteEnabled'] == 9:
             self.debug = True
         else:
@@ -207,7 +243,7 @@ class WebScraper:
             self.webMod = dynClass
             self.startDriver()
             self.log.msg("* Driver started")
-            self.webMod.setDriver(self.driver)
+            self.webMod.setWebScraper(self)
 
         # Using the meter class, proceed to login to the
         # website.
@@ -263,6 +299,9 @@ class WebScraper:
 ##
 dbConfig = '/home/psi/etc/config.db'
 logDir = '/home/psi/dataCollection/log'
+# For remote debugging
+##
+logDir = '/var/www/html/acepCollect/log'
 logFile = 'dataGather.log'
 
 logger = DebugOutput(logDir,logFile)
@@ -286,7 +325,8 @@ for m in activeMeters['credentials']:
             continue
         ct = ct + 1
         if ct == 1:
-            ws.setMeter(i,meters.meters[cc])
+            ws.setMeter(i,meters.meters[cc],meters.db)
+            ws.clearLogs()
             ws.log.msg("* Login %s (start)" % (i['siteName']))
             ws.login()
             ws.log.msg("* Login %s (end)" % (i['siteName']))

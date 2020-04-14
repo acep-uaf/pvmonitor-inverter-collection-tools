@@ -34,6 +34,15 @@ CREATE TABLE installations (
 	siteEnabled	INTEGER
 );
 
+-- Some installations have multiple independently reporting
+-- physical installations that do not record on the same
+-- time axis.
+CREATE TABLE installUnits (
+	siteName	TEXT,
+	siteUnit	TEXT,
+	unitName	TEXT
+);
+
 -- Basic statistics for site installations
 CREATE TABLE siteStatus (
 	installID	INTEGER,
