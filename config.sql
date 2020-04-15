@@ -8,9 +8,11 @@ CREATE TABLE meters (
 	meterPassword	TEXT
 );
 
--- Table for data locations
+-- Table for data locations for reading
+-- and writing data to the bmon server
 CREATE TABLE dataLocations (
 	urlID		INTEGER PRIMARY KEY,
+	dataMode	TEXT,
 	urlCode		TEXT,
 	urlTemplate	TEXT
 );
