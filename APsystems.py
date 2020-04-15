@@ -3,6 +3,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+# DEBUG
+# import pdb; pdb.set_trace()
+##
+
 # APsystems
 # Web page communications module
 # Required class functions
@@ -29,8 +33,10 @@ class APsystems:
         self.ws.driver.find_element_by_id("Login").click()
         self.waitFor("idClick","datetime_val",10)
 
-        #print(self.urlLogin)
-        #print(loginUsername,loginPassword)
+        if self.ws.debug:
+            print(self.urlLogin)
+            print(loginUsername,loginPassword)
+
         return
 
     def doLogout(self):
@@ -71,6 +77,24 @@ class APsystems:
         ##
         while ecuUnits:
             #self.saveScreen(currentECU+".png")
+            # This adequately changes the date, but individual times are not accessible
+            # Data is available every 5 minutes.  We may not need to actively click,
+            # data may be scrapable right from the chart by day.
+            #cmd = "document.getElementById('queryDate').value = '2020-04-11';"
+            #res = self.ws.driver.execute_script(cmd)
+            #print(res)
+            #cmd = "$.getDataByLevel();"
+            #res = self.ws.driver.execute_script(cmd)
+            #self.waitFor("idNotPresent","loadingDialog",10)
+            # Obtaining back data
+            # (1) select date
+            # (2) refresh
+            # (3) var charName = "#ArrayViewforHightChart";
+            # (4) var chart = $(charName).highcharts();
+            # (5) var xData = chart.series[0].points;
+            # (6) Time(timestamp): xData[0].series.xData
+            # (7) Solar(Watts)   : xData[0].series.yData
+            ##
             self.ws.saveScreen(currentECU+".png")
             self.ws.dumpLog(currentECU+".log")
             # Collect data for ECU that do not show

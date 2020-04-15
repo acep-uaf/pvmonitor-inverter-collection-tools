@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 
-import os, datetime, glob
-import sqlite_api
+import argparse, glob, os, sys
+import datetime, dateutil.parser, pytz
 import pydoc
+from requests import post
+import sqlite_api
 
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
@@ -10,18 +12,26 @@ from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.common.exceptions import NoSuchElementException
 
+# DEBUG
+# import pdb; pdb.set_trace()
+##
+
 # CLASSES
 ## 
 class Installations:
     def __init__(self):
         self.db = None
+        self.dataLocations = None
         self.installationData = None
         self.meters = None
+        self.options = {}
+        self.tzTarget = "US/Alaska"
+        self.tzObj = pytz.timezone(self.tzTarget)
 
     def hasUnits(self, installationName):
         result = False
 
-        s = "SELECT * FROM installUnits WHERE siteName=%" % (installationName)
+        s = "SELECT * FROM installUnits WHERE siteName=\"%s\"" % (installationName)
         self.db.query(s)
         if len(self.db.data) > 0:
             result = True
@@ -36,7 +46,7 @@ class Installations:
                 'credentials': []
         }
         for i in self.installationData:
-            if i['siteEnabled']:
+            if i['siteEnabled'] > 0:
                 act['sites'].append(i)
                 cc = i['credCode']
                 if not(cc in act['credentials']):
@@ -44,14 +54,20 @@ class Installations:
                 act['credentials'].sort()
         return act
 
+    def getOption(self, opt):
+        '''Get an option'''
+        if opt in self.options.keys():
+            return self.options[opt]
+        return None
+
     def getUnits(self, installationName):
 
-        s = "SELECT * FROM installUnits WHERE siteName=%" % (installationName)
+        s = "SELECT * FROM installUnits WHERE siteName=\"%s\"" % (installationName)
         self.db.query(s)
 
         unitNames = {}
         for r in self.db.data:
-            unitNames[r['unitName']] = r['siteName']
+            unitNames[r['unitName']] = r['siteUnit']
 
         return unitNames
 
@@ -84,6 +100,22 @@ class Installations:
             self.db.query("SELECT * FROM installations")
             self.installationData = self.db.data
 
+            self.db.query("SELECT * FROM dataLocations")
+            dataLocs = {}
+            for rec in self.db.data:
+                dataLocs[rec['urlCode']] = rec['urlTemplate']
+            self.dataLocations = dataLocs
+
+        return
+
+    def setOption(self, opt, val):
+        '''Set an option'''
+        self.options[opt] = val
+        return
+
+    def setTimezone(self, tzStr):
+        self.tzTarget = tzStr
+        self.tzObj = pytz.timezone(self.tzTarget)
         return
 
 class DebugOutput:
@@ -109,7 +141,7 @@ class DebugOutput:
         return
 
 class WebScraper:
-    def __init__(self,log=None):
+    def __init__(self,log=None,ins=None):
         self.credentials = {}
         self.debug = False
         self.driver = None
@@ -117,10 +149,13 @@ class WebScraper:
         self.driverOpen = False
         self.errorFlag = False
         self.errorMsg = None
-        self.log = log
         self.meter = {}
         self.webMod = None
-        self.db = None
+        # Bring objects forward, will figure out
+        # inheritance later.
+        ##
+        self.log = log
+        self.ins = ins
         return
 
     def clearLogs(self):
@@ -145,10 +180,6 @@ class WebScraper:
             fn.write("HTML:\n")
             fn.write(self.driver.page_source)
             fn.write("\n")
-            #fn.write("Console:\n")
-            #for entry in self.driver.get_log("browser"):
-            #    fn.write(entry)
-            #fn.write("\n")
             fn.close()
 
     def collectData(self):
@@ -165,13 +196,65 @@ class WebScraper:
             self.dumpLog("data.log")
 
         dataRecords = self.webMod.getDataRecords()
+        if self.debug:
+            print(dataRecords)
 
-        return
+        return dataRecords
 
     def logError(self,errorMessage):
         self.errorFlag = True
         self.errorMsg = errorMessage.strip()
         self.log.msg(self.errorMsg)
+        return
+
+    def postData(self, dataRecords):
+        # Determine if we are posting multiple records
+        # for a single site or a single record.
+        ##
+        site = self.meter['siteName']
+        if self.ins.hasUnits(site):
+            units = self.ins.getUnits(site)
+            for rec in dataRecords.keys():
+                if rec in units.keys():
+                    bmonSite = units[rec]
+                    urlTemplate = self.ins.dataLocations[self.meter['urlCode']]
+                    fullURL = (urlTemplate % (bmonSite))
+                    kwValue = dataRecords[rec]['power'] / 1000.0
+                    tmParse = dateutil.parser.parse(dataRecords[rec]['ob'])
+                    tmLOC = self.ins.tzObj.localize(tmParse)
+                    tmUTC = tmLOC.astimezone(pytz.timezone('UTC')).strftime("%Y-%m-%d %H:%M:%S")
+                    msg = "*> %s %s %s" % (bmonSite,tmUTC,str(kwValue))
+                    self.log.msg(msg)
+                    # Convert localized timezone to UTC before transmitting
+                    ##
+                    data = {
+                        'storeKey': self.meter['dataStoreKey'],
+                        'val': str(kwValue),
+                        'ts': tmUTC
+                    }
+                    resp = post(fullURL,data=data)
+        else:
+            # Posting a single value
+            # dataRecords should have a single key
+            ##
+            for rec in dataRecords.keys():
+                urlTemplate = self.ins.dataLocations[self.meter['urlCode']]
+                fullURL = (urlTemplate % (site))
+                kwValue = dataRecords[rec]['power'] / 1000.0
+                tmParse = dateutil.parser.parse(dataRecords[rec]['ob'])
+                tmLOC = self.ins.tzObj.localize(tmParse)
+                tmUTC = tmLOC.astimezone(pytz.timezone('UTC')).strftime("%Y-%m-%d %H:%M:%S")
+                msg = "*> %s %s %s" % (site,tmUTC,str(kwValue))
+                self.log.msg(msg)
+                # Convert localized timezone to UTC before transmitting
+                ##
+                data = {
+                    'storeKey': self.meter['dataStoreKey'],
+                    'val': str(kwValue),
+                    'ts': tmUTC
+                }
+                resp = post(fullURL,data=data)
+
         return
 
     def saveScreen(self, saveFile):
@@ -185,14 +268,15 @@ class WebScraper:
                 self.driver.save_screenshot(fullSaveFile)
         return
 
-    def setMeter(self,meter,cred,db):
+    def setMeter(self,meter,cred):
         self.meter = meter
         self.credentials = cred
-        self.db = db
         if meter['siteEnabled'] == 9:
             self.debug = True
         else:
             self.debug = False
+        if self.ins.getOption('debug'):
+            self.debug = True
         return
 
     def startDriver(self):
@@ -226,8 +310,9 @@ class WebScraper:
         return
 
     def login(self):
-        #print(self.meter)
-        #print(self.credentials)
+        #if self.debug:
+        #    print(self.meter)
+        #    print(self.credentials)
         meterClass = self.credentials['meterClass']
         # Do not reload the class if the module is already
         # loaded.
@@ -288,7 +373,6 @@ class WebScraper:
 
     def close(self):
         self.stopDriver()
-        self.log.close()
         return
 
 # MAIN PROGRAM
@@ -309,31 +393,51 @@ meters = Installations()
 meters.openDB(dbConfig)
 activeMeters = meters.getActiveMeters()
 
+# Command line parsing
+##
+parser = argparse.ArgumentParser()
+parser.add_argument("-d", help="turn on script debugging", action="store_true")
+parser.add_argument("-s", help="site to collect", action="append")
+args = parser.parse_args()
+# Turn on debugging script wide
+# disregard meter options
+##
+if args.d:
+    meters.setOption('debug',True)
+
+specificSites = args.s
+
 # Work through all the active meters by credential
 # so that we do not unnecessarily hammer a website
 # with login requests.
+#
+# Check command line arguments to see if we only should
+# process certain sites.
 ##
 for m in activeMeters['credentials']:
+    if specificSites:
+        if not(m in specificSites):
+            continue
     # Start a web scraper
     ##
-    ws = WebScraper(log=logger)
+    ws = WebScraper(log=logger,ins=meters)
     ws.log.msg("** Site %s" % (m))
     ct = 0
-    for i in activeMeters['sites']:
-        cc = i['credCode']
+    for siteRec in activeMeters['sites']:
+        cc = siteRec['credCode']
         if cc != m:
             continue
         ct = ct + 1
         if ct == 1:
-            ws.setMeter(i,meters.meters[cc],meters.db)
+            ws.setMeter(siteRec,meters.meters[cc])
             ws.clearLogs()
-            ws.log.msg("* Login %s (start)" % (i['siteName']))
+            ws.log.msg("* Login %s (start)" % (siteRec['siteName']))
             ws.login()
-            ws.log.msg("* Login %s (end)" % (i['siteName']))
+            ws.log.msg("* Login %s (end)" % (siteRec['siteName']))
         ws.log.msg("* Collect (start)")
-        ws.collectData()
+        dataRecords = ws.collectData()
         ws.log.msg("* Collect (end)")
-        #ws.postData()
+        ws.postData(dataRecords)
 
     ws.log.msg("* Logout (start)")
     ws.logout()
@@ -342,5 +446,4 @@ for m in activeMeters['credentials']:
     # Stop the web scraper
     ##
     ws.close()
-    break
-
+logger.close()
