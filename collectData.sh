@@ -8,7 +8,12 @@
 ##
 echo "LincolnCreek.py"
 python3 LincolnCreek.py
-sleep 2
+
+# New main routine for
+# other solar systems
+##
+./gatherData.py
+killall -q firefox
 
 exit
 

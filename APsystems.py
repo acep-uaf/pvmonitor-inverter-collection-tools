@@ -18,6 +18,8 @@ class APsystems:
     def __init__(self):
         self.urlLogin = "https://apsystemsema.com/ema/index.action"
         self.ws = None
+        self.testing = False
+        self.lastElement = None
 
     def doLogin(self,credentials):
         #print(credentials)
@@ -130,6 +132,9 @@ class APsystems:
     # This always takes us to the main data page
     ##
     def gotoDataPage(self):
+        if self.ws.driver == None:
+            return
+
         self.ws.driver.find_element_by_id("module_head").click()
         # wait for id='powerSlider' to exist
         # wait for id='navigator0' to exist
@@ -137,8 +142,12 @@ class APsystems:
         ##
         #self.waitFor("class","highcharts-axis-labels",10)
         self.waitFor("idNotPresent","loadingDialog",10)
+        return
 
     def gotoLoginPage(self):
+        if self.ws.driver == None:
+            return
+
         self.ws.driver.get(self.urlLogin)
         self.waitFor("idClick","Login",10)
         return
@@ -162,6 +171,7 @@ class APsystems:
     ##
     def waitFor(self,elementType,elementValue,elementTimeout):
 
+        element = None
         wait = WebDriverWait(self.ws.driver,elementTimeout)
         try:
             if elementType == "idClick":
@@ -170,7 +180,10 @@ class APsystems:
                 element = wait.until(EC.element_to_be_clickable((By.CLASS_NAME,elementValue)))
             if elementType == "idNotPresent":
                 element = wait.until(EC.invisibility_of_element_located((By.ID,elementValue)))
+            if elementType == "xpath":
+                element = wait.until(EC.visibility_of_element_located((By.XPATH,elementValue)))
         except:
             pass
 
+        self.lastElement = element
         return

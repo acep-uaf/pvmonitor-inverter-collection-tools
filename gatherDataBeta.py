@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
-import argparse, glob, os, sys
-import datetime, dateutil.parser, pytz
+import argparse, glob, os, sys, shutil
+import datetime, dateutil.parser, pytz, time
 import pydoc
 import requests, json
 import sqlite_api
@@ -27,6 +27,7 @@ class Installations:
         self.options = {}
         self.tzTarget = "US/Alaska"
         self.tzObj = pytz.timezone(self.tzTarget)
+        self.tzUTC = pytz.timezone("UTC")
 
     def hasUnits(self, installationName):
         result = False
@@ -172,6 +173,9 @@ class WebScraper:
                         os.unlink(fileName)
 
     def dumpLog(self, logFile):
+        if self.driver == None:
+            return
+
         baseDir = self.log.logDir
         if 'siteCode' in self.meter:
             meterDir = os.path.join(baseDir,self.meter['siteCode'])
@@ -212,33 +216,67 @@ class WebScraper:
     def postData(self, dataRecords):
         # Determine if we are posting multiple records
         # for a single site or a single record.
+        # Data structure
+        #   Units within a site and data
+        # { '204000001190': [{'ob': '2020-04-21 16:54:44', 'power': 2350}, {}] }
+        # or
+        #   SiteID and data
+        # { 'AmblerWTP': [{'ob': '2020-04-21 16:54:44', 'power': 2350}, {}] }
+        # NOTE: FOR NOW WILL ONLY SUPPORT ONE DAYS WORTH OF DATA AT ONE TIME
         ##
-        site = self.meter['siteName']
+        site = self.meter['siteCode']
         if self.ins.hasUnits(site):
             units = self.ins.getUnits(site)
         else:
             units = {}
+        urlTemplateStore = self.ins.dataLocations[self.meter['urlCode']]['store']
+        urlTemplateRead = self.ins.dataLocations[self.meter['urlCode']]['read']
+        fullURLStoreMany = self.ins.dataLocations[self.meter['urlCode']]['storeMany']
         for rec in dataRecords.keys():
-            urlTemplateStore = self.ins.dataLocations[self.meter['urlCode']]['store']
-            urlTemplateRead = self.ins.dataLocations[self.meter['urlCode']]['read']
             if rec in units.keys():
                 site = units[rec]
             fullURLStore = (urlTemplateStore % (site))
             fullURLRead = (urlTemplateRead % (site))
-            kwValue = dataRecords[rec]['power'] / 1000.0
-            tmParse = dateutil.parser.parse(dataRecords[rec]['ob'])
-            tmLOC = self.ins.tzObj.localize(tmParse)
-            tmUTC = tmLOC.astimezone(pytz.timezone('UTC')).strftime("%Y-%m-%d %H:%M:%S")
+            tmUTCmin = None
+            tmUTCmax = None
+            ct = 0
+            for r in dataRecords[rec]:
+                kwValue = r['power'] / 1000.0
+                tmParse = dateutil.parser.parse(r['ob'])
+                tmLOC = self.ins.tzObj.localize(tmParse)
+                tmUTC = tmLOC.astimezone(pytz.timezone('UTC')).strftime("%Y-%m-%d %H:%M:%S")
+                # Replace ob date/time with UTC value
+                ##
+                r['ob'] = tmUTC
+                r['power'] = kwValue
+                ct = ct + 1
+                if ct == 1:
+                    tmUTCmin = tmUTC
+                    tmUTCmax = tmUTC
+                else:
+                    if tmUTC > tmUTCmax:
+                        tmUTCmax = tmUTC
+                    if tmUTC < tmUTCmin:
+                        tmUTCmin = tmUTC
             # Try to read data to see if it already exists
             ##
             tmExists = []
             payload = {
                 'timezone': 'UTC',
-                'start_ts': tmUTC,
-                'end_ts': tmUTC
+                'start_ts': tmUTCmin,
+                'end_ts': tmUTCmax
             }
             readResult = requests.get(fullURLRead,params=payload)
             bmonData = json.loads(readResult.text)
+            #print(fullURLRead)
+            #print(payload)
+            #print(bmonData)
+            #import pdb; pdb.set_trace()
+            if bmonData['status'] != 'success':
+                msg = "Unable to read from bmon server, not performing updates."
+                self.log.msg(msg)
+                return
+
             for bmonRec in bmonData['data']['readings']:
                 tmStr = bmonRec[0]
                 tmExists.append(tmStr)
@@ -249,17 +287,55 @@ class WebScraper:
 
             # Convert localized timezone to UTC before transmitting
             ##
-            #import pdb; pdb.set_trace()
+            print(dataFlag)
+            import pdb; pdb.set_trace()
             if dataFlag == "write":
-                data = {
-                    'storeKey': self.meter['dataStoreKey'],
-                    'val': str(kwValue),
-                    'ts': tmUTC
-                }
-                resp = requests.post(fullURLStore,data=data)
-            msg = "*> %s %s %s %s" % (site,tmUTC,str(kwValue),dataFlag)
-            self.log.msg(msg)
+                if len(dataRecords[rec]) > 1:
+                    # This format is form multiple readings
+                    # [timestamp, siteID, value]
+                    ##
+                    #{"storeKey": "123abc",
+                    #    "readings": [
+                    #        [1432327040, "AmblerWTP", 71.788],
+                    #        [1432327042, "test_cpu_temp", 45.527],
+                    #        [1432327040, "28.FF1A2D021400", 65.859]
+                    #    ]
+                    #}
+                    # Process into a bmon payload
+                    ##
+                    data = { 'storeKey': self.meter['dataStoreKey'],
+                            'readings': [
+                                ]
+                            }
+                    for r in dataRecords[rec]:
+                        obStr = r['ob']
+                        t = dateutil.parser.parse(obStr)
+                        t = self.ins.tzUTC.localize(t)
+                        obDt = t.timestamp()
+                        obVal = r['power']
+                        drec = [obDt, site, obVal]
+                        data['readings'].append(drec)
 
+                    data = json.dumps(data)
+                    headers = {'Accept' : 'application/json', 'Content-Type' : 'application/json'}
+                    resp = requests.post(fullURLStoreMany,data=data,headers=headers)
+                    msg = "*> Multi value write: %s (%s)" % (site,resp.text)
+                    self.log.msg(msg)
+                else:
+                    # This stores one reading
+                    ##
+                    kwValue = dataRecords[rec][0]['power']
+                    tmUTC = dataRecords[rec][0]['ob']
+                    data = {
+                        'storeKey': self.meter['dataStoreKey'],
+                        'val': str(kwValue),
+                        'ts': tmUTC
+                    }
+                    data = json.dumps(data)
+                    headers = {'Accept' : 'application/json', 'Content-Type' : 'application/json'}
+                    resp = requests.post(fullURLStore,data=data,headers=headers)
+                    msg = "*> %s %s %s %s" % (site,tmUTC,str(kwValue),dataFlag)
+                    self.log.msg(msg)
         return
 
     def saveScreen(self, saveFile):
@@ -310,8 +386,17 @@ class WebScraper:
 
     def stopDriver(self):
         if self.driverOpen:
-            self.driver.close()
+            self.driver.quit()
             self.driverOpen = False
+            # Delete temporary directory
+            # if utilized
+            ##
+            try:
+                if self.webMod.tmpDir != None:
+                    if os.path.isdir(self.webMod.tmpDir):
+                        shutil.rmtree(self.webMod.tmpDir)
+            except:
+                pass
         return
 
     def login(self):
@@ -331,8 +416,15 @@ class WebScraper:
             dynAttr = getattr(dynObj,meterClass)
             dynClass = dynAttr()
             self.webMod = dynClass
-            self.startDriver()
-            self.log.msg("* Driver started")
+            # If program name is gatherDataBeta.py, ignore testing
+            # flag
+            ##
+            if self.webMod.testing == False and os.path.basename(sys.argv[0]) != 'gatherDataBeta.py':
+                self.startDriver()
+                self.log.msg("* Driver started")
+            else:
+                self.startDriver()
+                self.log.msg("* Driver testing: %s" % (meterClass))
             self.webMod.setWebScraper(self)
 
         # Using the meter class, proceed to login to the
@@ -363,6 +455,8 @@ class WebScraper:
             if self.debug:
                 self.saveScreen("postLogin.png")
 
+        #import pdb; pdb.set_trace()
+
         return
 
     def logout(self):
@@ -391,7 +485,10 @@ logDir = '/home/psi/dataCollection/log'
 # For remote debugging
 ##
 logDir = '/var/www/html/acepCollect/log'
-logFile = 'dataGather.log'
+if os.path.basename(sys.argv[0]) != 'gatherDataBeta.py':
+    logFile = 'dataGather.log'
+else:
+    logFile = 'dataGather2.log'
 
 logger = DebugOutput(logDir,logFile)
 meters = Installations()
@@ -402,15 +499,18 @@ activeMeters = meters.getActiveMeters()
 ##
 parser = argparse.ArgumentParser()
 parser.add_argument("-d", help="turn on script debugging", action="store_true")
+parser.add_argument("-g", help="site group to collect", action="append")
 parser.add_argument("-s", help="site to collect", action="append")
 args = parser.parse_args()
 # Turn on debugging script wide
 # disregard meter options
 ##
+meters.setOption('debug',False)
 if args.d:
     meters.setOption('debug',True)
 
-specificSites = args.s
+meters.setOption('siteSelection',args.s)
+siteGroups = args.g
 
 # Work through all the active meters by credential
 # so that we do not unnecessarily hammer a website
@@ -420,25 +520,33 @@ specificSites = args.s
 # process certain sites.
 ##
 for m in activeMeters['credentials']:
-    if specificSites:
-        if not(m in specificSites):
+    if siteGroups:
+        if not(m in siteGroups):
             continue
+    if meters.options['debug']:
+        print(">%s" % (m))
     # Start a web scraper
     ##
     ws = WebScraper(log=logger,ins=meters)
-    ws.log.msg("** Site %s" % (m))
+    ws.log.msg("** Site Group %s" % (m))
     ct = 0
     for siteRec in activeMeters['sites']:
         cc = siteRec['credCode']
         if cc != m:
             continue
+        siteCode = siteRec['siteCode']
+        if meters.options['siteSelection']:
+            if not(siteCode in meters.options['siteSelection']):
+                continue
+        if meters.options['debug']:
+            print(">>%s" % (siteCode))
         ct = ct + 1
+        ws.setMeter(siteRec,meters.meters[cc])
         if ct == 1:
-            ws.setMeter(siteRec,meters.meters[cc])
             ws.clearLogs()
-            ws.log.msg("* Login %s (start)" % (siteRec['siteName']))
+            ws.log.msg("* Login %s (start)" % (cc))
             ws.login()
-            ws.log.msg("* Login %s (end)" % (siteRec['siteName']))
+            ws.log.msg("* Login %s (end)" % (cc))
 
         if ws.errorFlag == False:
             ws.log.msg("* Collect (start)")
