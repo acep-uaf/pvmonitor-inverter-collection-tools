@@ -203,7 +203,7 @@ class WebScraper:
 
         dataRecords = self.webMod.getDataRecords()
         if self.debug:
-            print(dataRecords)
+            print("WS:",dataRecords)
 
         return dataRecords
 
@@ -240,6 +240,7 @@ class WebScraper:
             tmUTCmin = None
             tmUTCmax = None
             ct = 0
+            #import pdb; pdb.set_trace()
             for r in dataRecords[rec]:
                 kwValue = r['power'] / 1000.0
                 tmParse = dateutil.parser.parse(r['ob'])
@@ -268,10 +269,6 @@ class WebScraper:
             }
             readResult = requests.get(fullURLRead,params=payload)
             bmonData = json.loads(readResult.text)
-            #print(fullURLRead)
-            #print(payload)
-            #print(bmonData)
-            #import pdb; pdb.set_trace()
             if bmonData['status'] != 'success':
                 msg = "Unable to read from bmon server, not performing updates."
                 self.log.msg(msg)
@@ -287,8 +284,8 @@ class WebScraper:
 
             # Convert localized timezone to UTC before transmitting
             ##
-            print(dataFlag)
-            import pdb; pdb.set_trace()
+            if self.debug:
+                print(dataFlag,dataRecords[rec])
             if dataFlag == "write":
                 if len(dataRecords[rec]) > 1:
                     # This format is form multiple readings
@@ -331,9 +328,9 @@ class WebScraper:
                         'val': str(kwValue),
                         'ts': tmUTC
                     }
-                    data = json.dumps(data)
-                    headers = {'Accept' : 'application/json', 'Content-Type' : 'application/json'}
-                    resp = requests.post(fullURLStore,data=data,headers=headers)
+                    # Do not convert data to json before requests.post call
+                    ##
+                    resp = requests.post(fullURLStore,data=data)
                     msg = "*> %s %s %s %s" % (site,tmUTC,str(kwValue),dataFlag)
                     self.log.msg(msg)
         return
@@ -363,6 +360,19 @@ class WebScraper:
     def startDriver(self):
         if self.driverOpen:
             return
+
+        # Create tmp directory (if requested)
+        ##
+        try:
+            if not(os.path.isdir(self.tmpDir)):
+                os.mkdir(self.tmpDir,0o755)
+            if not(os.path.isdir(self.tmpDir)):
+                msg = "Unable to make temporary directory: %s" % (self.tmpDir)
+                self.logError(msg)
+                sys.exit()
+        except:
+            pass
+
         options = Options()
         options.add_argument('-headless')
         cap = DesiredCapabilities.FIREFOX
@@ -416,14 +426,16 @@ class WebScraper:
             dynAttr = getattr(dynObj,meterClass)
             dynClass = dynAttr()
             self.webMod = dynClass
-            # If program name is gatherDataBeta.py, ignore testing
-            # flag
+            # Start the driver if we are not testing
             ##
-            if self.webMod.testing == False and os.path.basename(sys.argv[0]) != 'gatherDataBeta.py':
+            if self.webMod.testing == False:
                 self.startDriver()
                 self.log.msg("* Driver started")
             else:
-                self.startDriver()
+                # Start the driver from the testing application only
+                ##
+                if os.path.basename(sys.argv[0]) == 'gatherDataBeta.py':
+                    self.startDriver()
                 self.log.msg("* Driver testing: %s" % (meterClass))
             self.webMod.setWebScraper(self)
 

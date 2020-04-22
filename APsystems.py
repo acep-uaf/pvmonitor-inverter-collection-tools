@@ -37,7 +37,7 @@ class APsystems:
 
         if self.ws.debug:
             print(self.urlLogin)
-            print(loginUsername,loginPassword)
+            print(self.ws.meter['siteName'],loginUsername,loginPassword)
 
         return
 
@@ -113,10 +113,10 @@ class APsystems:
                 for rec in dataObjs:
                     totalWatts = totalWatts + int(rec.text)
                 tm = "%s %s" % (dob,tob)
-                dataRecs[currentECU] = {
+                dataRecs[currentECU] = [{
                         'ob': tm,
                         'power': totalWatts
-                        }
+                        }]
             ecuUnits.remove(currentECU)
             if ecuUnits:
                 currentECU = ecuUnits[0]

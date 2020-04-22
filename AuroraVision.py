@@ -29,13 +29,6 @@ class AuroraVision:
         self.tmpDir = "/home/psi/dataCollection/tmp/%d" % (self.myPid)
         self.tmpFile = "%s/download.csv" % (self.tmpDir)
 
-        if not(os.path.isdir(self.tmpDir)):
-            os.mkdir(self.tmpDir,0o755)
-        if not(os.path.isdir(self.tmpDir)):
-            msg = "Unable to make temporary directory: %s" % (self.tmpDir)
-            self.logError(msg)
-            sys.exit()
-
     def doLogin(self,credentials):
         loginUsername = credentials["meterUsername"]
         loginPassword = credentials["meterPassword"]
@@ -78,7 +71,7 @@ class AuroraVision:
         #import pdb; pdb.set_trace()
         elements[0].click()
         # expecting download.csv
-        # wait for up to 10 seconds
+        # wait for up to 15 seconds
         ##
         found = False
         ct = 0
