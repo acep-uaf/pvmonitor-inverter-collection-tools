@@ -54,11 +54,16 @@ class AuroraVision:
 
     def getDataRecords(self):
         dataRecs = {}
-        # Select "1D" page
-        # Wait for:
-        # <div class="chartView hideWhileLoading" style="display: block;">
-        # while page is reloading, style is "display: none;"
+        # Detect no data available
+        # If no data is available, the CSV button is typically disabled
+        # and we should just return no data.
         ##
+        xp = "//div[@class='alert alert-info noChartData hideOnLoad']"
+        elements = self.ws.driver.find_elements_by_xpath(xp)
+
+        if elements[0].is_displayed():
+            return dataRecs
+
         self.ws.dumpLog("trace2.log")
         self.ws.saveScreen("trace2.png")
         xp = "//div[@class='csvButton']"
@@ -144,12 +149,15 @@ class AuroraVision:
         xp = "//div[@class='chartView hideWhileLoading']"
         self.waitFor("xpath",xp,10)
 
-        # Detect no data available
-        ##
 
         # Make sure we are on AC Output
         ##
 
+        # Select "1D" page
+        # Wait for:
+        # <div class="chartView hideWhileLoading" style="display: block;">
+        # while page is reloading, style is "display: none;"
+        ##
         # Make sure we are on the 1D view
         # There are more than one, it is always the
         # first one.

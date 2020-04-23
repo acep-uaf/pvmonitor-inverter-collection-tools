@@ -239,6 +239,8 @@ class WebScraper:
             fullURLRead = (urlTemplateRead % (site))
             tmUTCmin = None
             tmUTCmax = None
+            # Convert localized timezone to UTC before transmitting
+            ##
             ct = 0
             #import pdb; pdb.set_trace()
             for r in dataRecords[rec]:
@@ -279,11 +281,19 @@ class WebScraper:
                 tmExists.append(tmStr)
 
             dataFlag = "write"
-            if tmUTC in tmExists:
+            # Delete any existing records read from website
+            # which are already in the bmon site
+            ##
+            newRec = []
+            for r in dataRecords[rec]:
+                obStr = r['ob']
+                if not(obStr in tmExists):
+                    newRec.append(r)
+            dataRecords[rec] = newRec
+
+            if len(dataRecords[rec]) == 0:
                 dataFlag = "skip"
 
-            # Convert localized timezone to UTC before transmitting
-            ##
             if self.debug:
                 print(dataFlag,dataRecords[rec])
             if dataFlag == "write":
@@ -299,6 +309,7 @@ class WebScraper:
                     #    ]
                     #}
                     # Process into a bmon payload
+                    # Skip existing records
                     ##
                     data = { 'storeKey': self.meter['dataStoreKey'],
                             'readings': [

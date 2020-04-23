@@ -15,6 +15,10 @@ python3 LincolnCreek.py
 ./gatherData.py
 killall -q firefox
 
+# Run specific debug items
+##
+#./gatherDataBeta.py -g AP1 -d
+
 exit
 
 echo "run_sunny_portal.py"
