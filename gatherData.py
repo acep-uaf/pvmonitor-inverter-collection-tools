@@ -239,6 +239,8 @@ class WebScraper:
             fullURLRead = (urlTemplateRead % (site))
             tmUTCmin = None
             tmUTCmax = None
+            # Convert localized timezone to UTC before transmitting
+            ##
             ct = 0
             #import pdb; pdb.set_trace()
             for r in dataRecords[rec]:
@@ -279,11 +281,19 @@ class WebScraper:
                 tmExists.append(tmStr)
 
             dataFlag = "write"
-            if tmUTC in tmExists:
+            # Delete any existing records read from website
+            # which are already in the bmon site
+            ##
+            newRec = []
+            for r in dataRecords[rec]:
+                obStr = r['ob']
+                if not(obStr in tmExists):
+                    newRec.append(r)
+            dataRecords[rec] = newRec
+
+            if len(dataRecords[rec]) == 0:
                 dataFlag = "skip"
 
-            # Convert localized timezone to UTC before transmitting
-            ##
             if self.debug:
                 print(dataFlag,dataRecords[rec])
             if dataFlag == "write":
@@ -299,6 +309,7 @@ class WebScraper:
                     #    ]
                     #}
                     # Process into a bmon payload
+                    # Skip existing records
                     ##
                     data = { 'storeKey': self.meter['dataStoreKey'],
                             'readings': [
@@ -314,6 +325,8 @@ class WebScraper:
                         data['readings'].append(drec)
 
                     data = json.dumps(data)
+                    if self.debug:
+                        print("JSON:%s" % (data))
                     headers = {'Accept' : 'application/json', 'Content-Type' : 'application/json'}
                     resp = requests.post(fullURLStoreMany,data=data,headers=headers)
                     msg = "*> Multi value write: %s (%s)" % (site,resp.text)
@@ -428,14 +441,19 @@ class WebScraper:
             self.webMod = dynClass
             # Start the driver if we are not testing
             ##
+            # Sometimes the web scraping driver is not really needed.
+            # This is signaled with urlLogin set to ""
+            ##
             if self.webMod.testing == False:
-                self.startDriver()
+                if self.webMod.urlLogin != "":
+                    self.startDriver()
                 self.log.msg("* Driver started")
             else:
                 # Start the driver from the testing application only
                 ##
                 if os.path.basename(sys.argv[0]) == 'gatherDataBeta.py':
-                    self.startDriver()
+                    if self.webMod.urlLogin != "":
+                        self.startDriver()
                 self.log.msg("* Driver testing: %s" % (meterClass))
             self.webMod.setWebScraper(self)
 
@@ -542,6 +560,7 @@ for m in activeMeters['credentials']:
     ws = WebScraper(log=logger,ins=meters)
     ws.log.msg("** Site Group %s" % (m))
     ct = 0
+    loggedIn = False
     for siteRec in activeMeters['sites']:
         cc = siteRec['credCode']
         if cc != m:
@@ -559,6 +578,8 @@ for m in activeMeters['credentials']:
             ws.log.msg("* Login %s (start)" % (cc))
             ws.login()
             ws.log.msg("* Login %s (end)" % (cc))
+            if ws.errorFlag == False:
+                loggedIn = True
 
         if ws.errorFlag == False:
             ws.log.msg("* Collect (start)")
@@ -567,7 +588,7 @@ for m in activeMeters['credentials']:
             ws.log.msg("* Collect (end)")
             ws.postData(dataRecords)
 
-    if ws.errorFlag == False:
+    if ws.errorFlag == False and loggedIn:
         ws.log.msg("* Logout (start)")
         ws.logout()
         ws.log.msg("* Logout (end)")

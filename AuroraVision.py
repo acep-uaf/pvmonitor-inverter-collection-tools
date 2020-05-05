@@ -23,7 +23,7 @@ class AuroraVision:
         self.urlHeadDataPage = "https://www.auroravision.net/dash/home.jsf"
         self.urlDataPageExample = "https://www.auroravision.net/dash/assets/summary.jsf#3466383"
         self.ws = None
-        self.testing = True
+        self.testing = False
         self.lastElement = None
         self.myPid = os.getpid()
         self.tmpDir = "/home/psi/dataCollection/tmp/%d" % (self.myPid)
@@ -46,6 +46,10 @@ class AuroraVision:
         # self.driver.find_elements_by_xpath("//div[@class='data-label cell' and text()='Last 30 Days']")
         xp = "//div[@class='data-label cell' and text()='Last 30 Days']"
         self.waitFor("xpath",xp,15)
+
+        if self.ws.debug:
+            print(self.urlLogin)
+            print(self.ws.meter['siteName'],loginUsername,loginPassword)
 
         return
 
@@ -149,9 +153,19 @@ class AuroraVision:
         xp = "//div[@class='chartView hideWhileLoading']"
         self.waitFor("xpath",xp,10)
 
-
         # Make sure we are on AC Output
         ##
+        xp = "//span[@configtype='Output']"
+        elements = self.ws.driver.find_elements_by_xpath(xp)
+        if len(elements) > 0:
+            # Check for selected
+            ##
+            vals = elements[0].get_attribute('class')
+            varr = vals.split(" ")
+            if not('selected' in varr):
+                elements[0].click()
+                xp = "//div[@class='chartView hideWhileLoading']"
+                self.waitFor("xpath",xp,10)
 
         # Select "1D" page
         # Wait for:
